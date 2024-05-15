@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <link rel="stylesheet" type="text/css" href="style.css">
+
+        <script type="importmap">
+        {
+            "imports": {
+                "three": "./node_modules/three/build/three.module.js",
+                "Stats": "./node_modules/three/examples/jsm/libs/stats.module.js",
+                "EffectComposer": "./node_modules/three/examples/jsm/postprocessing/EffectComposer.js",
+                "RenderPass": "./node_modules/three/examples/jsm/postprocessing/RenderPass.js",
+                "UnrealBloomPass": "./node_modules/three/examples/jsm/postprocessing/UnrealBloomPass.js",
+                "OutputPass": "./node_modules/three/examples/jsm/postprocessing/OutputPass.js"
+            }
+        }
+        </script>
+    </head>
+    <body>
+        <script type="module" src="main.js"></script>
+        <canvas id="webgl"></canvas>
+        <canvas id="pdf_container"></canvas>
+    </body>
+</html>
