@@ -1,6 +1,6 @@
 body {
     margin: 0px;
-    overflow: hiddern;
+    overflow: hidden;
     background-color: #000000;
 }
 
@@ -28,18 +28,4 @@ body {
 #webgl
 {
   z-index: -1;
-}
-
-#slides
-{
-  color: #ffffff;
-  background-color: #000000;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.0;
-}
-
-#slides>*
-{
-  pointer-events: auto;
 }
