@@ -10,6 +10,7 @@ body {
   margin-left: auto;
   margin-right: auto;
   display: block;
+  /* width: 98%; */
   height: 100vh;
   z-index: 1;
   opacity: 0.0;

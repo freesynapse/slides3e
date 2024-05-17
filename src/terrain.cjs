@@ -1,7 +1,7 @@
 
 const THREE = require('three');
 const Perlin = require('./noise.cjs').Perlin;
-const settings = require('./settings.cjs');
+const cfg = require('./config.cjs');
 
 //
 class Chunk
@@ -16,7 +16,7 @@ class Chunk
         this.v_chunk = v_chunk;
 
         this.chunk_geom = new THREE.PlaneGeometry(this.dim, this.dim, this.res, this.res);
-        this.chunk_geom.deleteAttribute('normal');
+        // this.chunk_geom.deleteAttribute('normal');
         this.chunk_geom.deleteAttribute('uv');
         // this.chunk_mat  = new THREE.MeshStandardMaterial({ color: 0x808080, wireframe: true, side: THREE.FrontSide });
         this.chunk_mat  = new THREE.MeshLambertMaterial({ color: 0xb0b0b0, side: THREE.BackSide }); //wireframe: true, side: THREE.FrontSide });
@@ -38,9 +38,9 @@ class Chunk
             vertices[i+1] = perlin.octave_noise(
                 (this.chunk_mesh.position.x + vertices[i+0]),
                 (this.chunk_mesh.position.z + vertices[i+2]),
-                settings.OCTAVES,
-                settings.MAX_HEIGHT,
-                settings.SMOOTHING
+                cfg.terrain.octaves,
+                cfg.terrain.max_height,
+                cfg.terrain.smoothing
             );
         }
         
@@ -63,7 +63,7 @@ class ChunkManager
 
         this.chunk_map = new Map();
 
-        this.perlin = new Perlin(settings.NOISE_SEED);
+        this.perlin = new Perlin(cfg.terrain.seed);
 
     }
 

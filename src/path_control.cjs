@@ -1,21 +1,24 @@
 
+const cfg = require('./config.cjs');
+
 //
 class PathControls
 {
-    constructor(cam, nslides, path, markers, npoints)
+    constructor(cam, nslides, path, markers, npoints, webgl_container, pdf_container, 
+                render_page_callback)
     {
         this.current_marker = -1;
         this.delta_pos = 0.1 / nslides;
-        this.marker_dist_stop = 10.0;
-        this.frac_on_path = 0.0;
-        this.frac_on_marker_path = 0.0;
+        this.marker_dist_stop = cfg.path_control.marker_dist_stop;
+        this.frac_on_path = 0.0;            // [0..1] for whole path.
+        this.frac_on_marker_path = 0.0;     // [0..n/N] for inter-marker segments
+        this.frac_inter_marker = 0.0;       // [0..1] for inter-marker segments.
         this.n_points_on_path = npoints;
         this.max_marker_points = 0;
-        this.base_mv_speed = 0.005 / nslides;
-        this.step_speed = 0.5;
-        this.step = 0;
-        this.min_speed = 0.8;
-        this.max_speed = 1.9;
+        this.base_mv_speed = cfg.path_control.base_mv_speed / nslides;
+        this.step_speed = cfg.path_control.step_speed;
+        this.min_speed = cfg.path_control.min_speed;
+        this.max_speed = cfg.path_control.max_speed;
 
         //
         this.cam = cam;
@@ -25,14 +28,22 @@ class PathControls
         this.marker_fracs_cum = [];
         this.marker_fracs = [];
         this.mv_speed = [];
-        
+
+        //
+        this.slide_render_callback = render_page_callback;
+
         // transforms
+        this.transform_speed = cfg.path_control.transform_speed;
         this.webgl_opacity = 1.0;
-        this.webl_min_opacity = 1.0;
-        this.webgl_dt = (this.webgl_opacity - this.webl_min_opacity) / 30.0;
+        this.webl_min_opacity = cfg.path_control.webl_min_opacity;
+        this.webgl_dt = (this.webgl_opacity - this.webl_min_opacity) * this.transform_speed;
         this.slide_opacity = 0.0;
-        this.slide_dt = 1.0 / 30.0;
+        this.slide_dt = 1.0 * this.transform_speed;
         this.next_action = -1;
+        this.transform_on_path = cfg.path_control.transform_on_path;
+        this.transform_on_path_frac = cfg.path_control.transform_on_path_frac;
+        this.webgl_container = webgl_container;
+        this.pdf_container = pdf_container;
 
         // state machine
         this.at_marker = false;
@@ -40,22 +51,23 @@ class PathControls
         this.is_transforming_into = false;
         this.is_displaying_slide = false;
         this.is_transforming_from = false;
+        this.is_transforming_on_path = false;
 
         // calc steps between all markers for later interpolation
         this.calc_marker_step_distances_();
 
     }
 
-    //
     debug_state() {
-        console.log('STATE:');
-        console.log('this.at_marker', this.at_marker);
-        console.log('this.is_stepping', this.is_stepping);
-        console.log('this.is_transforming_into', this.is_transforming_into);
-        console.log('this.is_displaying_slide', this.is_displaying_slide);
-        console.log('this.is_transforming_from', this.is_transforming_from);
+        console.log('==============================================');
+        console.log('this.at_marker: ', this.at_marker);
+        console.log('this.is_stepping: ', this.is_stepping);
+        console.log('this.is_transforming_into: ', this.is_transforming_into);
+        console.log('this.is_displaying_slide: ', this.is_displaying_slide);
+        console.log('this.is_transforming_from: ', this.is_transforming_from);
+        console.log('this.next_action: ', this.next_action);
+        console.log('this.is_transforming_on_path: ', this.is_transforming_on_path);
     }
-
     //
     calc_marker_step_distances_()
     {
@@ -173,12 +185,11 @@ class PathControls
             return false;
 
         this.is_stepping = true;
-        this.step = 0;
         // update current marker (since we're moving there)
         this.current_marker = next_marker;
-        // reset this marker path fraction
+        // reset this marker path fractions
         this.frac_on_marker_path = 0.0;
-
+        this.frac_inter_marker = 0.0;
         // precalculate speeds from a gaussian
         let nsteps = this.marker_steps[this.current_marker];
         this.mv_speed = [];
@@ -202,7 +213,8 @@ class PathControls
         let ymin =  100;
         for (let i = 0; i < nsteps; i++)
         {
-            let speed = gaussian_(x, 0.0, 1.6);
+            // let speed = gaussian_(x, 0.0, 1.6);
+            let speed = gaussian_(x, 0.0, cfg.path_control.gaussian_sigma);
             ymin = Math.min(ymin, speed);
             ymax = Math.max(ymax, speed);
             this.mv_speed.push(speed);
@@ -225,23 +237,31 @@ class PathControls
 
         this.is_stepping = true;
 
+        let dist_to_next_marker = Math.abs(next_marker_z - this.cam.position.z);
+
         // reached marker
-        if (Math.abs(next_marker_z - this.cam.position.z) < this.marker_dist_stop)
-        {
+        if (dist_to_next_marker < this.marker_dist_stop && !this.transform_on_path) {
             this.at_marker = true;
             this.is_stepping = false;
             this.is_transforming_into = true;
         }
 
-        else
-        {
-            //
+        // state change when transforming on path
+        else if (dist_to_next_marker < this.marker_dist_stop && this.transform_on_path) {
+            this.at_marker = true;
+            this.is_stepping = false;
+            this.is_transforming_into = false;
+            this.is_transforming_on_path = false;
+            this.webgl_container.style.opacity = this.webl_min_opacity;
+            this.pdf_container.style.opacity = 1.0;
+        }
+
+        else {
             let speed_idx = Math.round((this.frac_on_marker_path / this.marker_fracs[this.current_marker]) * this.marker_steps[this.current_marker]);
 
             if (speed_idx >= this.mv_speed.length)
                 speed_idx = this.mv_speed.length - 1;
 
-            // let dist = (this.step_speed * this.mv_speed[speed_idx]) / this.n_points_on_path;
             let dist = (this.base_mv_speed * this.mv_speed[speed_idx]) / (this.max_marker_points / this.marker_steps[this.current_marker]);
 
             // take step along path
@@ -259,15 +279,13 @@ class PathControls
                     pos1 = this.markers[this.current_marker].position;
                     pos1.y -= 4;
                 }
-                // let pos1 = this.path.getPointAt(this.frac_on_path + this.delta_pos);
+
                 this.cam.position.set(pos0.x, pos0.y + 4, pos0.z);
-                // this.cam.lookAt(pos1.x, pos1.y + 4, pos1.z);
                 this.cam.lookAt(pos1.x, pos1.y, pos1.z);
     
                 // update location
                 this.frac_on_path += dist;
                 this.frac_on_marker_path += dist;
-                
             }
     
             // last marker, special treatment
@@ -281,35 +299,57 @@ class PathControls
                 // update state
                 this.frac_on_path += dist;
                 this.frac_on_marker_path += dist;
-    
             }
-    
-        }
 
+            // this.marker_fracs[this.current_marker] contain the length of total path ([0..1])
+            // for the current inter-marker segment
+            //
+            // (this.frac_on_marker_path / this.marker_fracs[this.current_marker]) --> [0..1] on this inter-segment path
+            //
+            this.frac_inter_marker = (this.frac_on_marker_path / this.marker_fracs[this.current_marker]);
+            // console.log('this.frac_inter_marker:', this.frac_inter_marker);
+
+            if (this.transform_on_path && this.frac_inter_marker > this.transform_on_path_frac) {
+                if (!this.is_transforming_on_path) {
+                    // render page (once)
+                    this.slide_render_callback(this.current_marker);
+                    this.is_transforming_on_path = true;
+                }
+                
+                this.slide_opacity = (this.frac_inter_marker - this.transform_on_path_frac) / 
+                                     (1.0 - this.transform_on_path_frac);
+                // this.pdf_container.style.opacity = Math.min(opacity, 1.0);
+                this.pdf_container.style.opacity = this.slide_opacity;
+
+                // don't fade out scene, set (above) when pdf is faded in
+                //let webgl_dt = (this.webgl_opacity - this.webl_min_opacity)...
+
+                this.is_displaying_slide = true;
+            }
+            
+        }
+        
     }
 
     //
-    transform_to(webgl_container, pdf_container, render_callback)
+    transform_to()
     {
         if (!this.is_displaying_slide) {
-            render_callback(this.current_marker);
+            this.slide_render_callback(this.current_marker);
         }
 
         this.is_displaying_slide = true;
 
         // fade out geometry and fade in slide (over 0.5 s)
-        //
-        // pdf_container.innerHTML = slides[this.current_marker];
-
         if (this.webgl_opacity > 0.0) {
             this.webgl_opacity -= this.webgl_dt;
         }
-        webgl_container.style.opacity = this.webgl_opacity;
+        this.webgl_container.style.opacity = this.webgl_opacity;
 
         if (this.slide_opacity < 1.0) {
             this.slide_opacity += this.slide_dt;
         }
-        pdf_container.style.opacity = this.slide_opacity;
+        this.pdf_container.style.opacity = this.slide_opacity;
 
         // set state flags
         if (this.slide_opacity >= 1.0 && this.webgl_opacity <= this.webl_min_opacity) {
@@ -320,19 +360,19 @@ class PathControls
     }
 
     //
-    transform_from(webgl_container, pdf_container)
+    transform_from()
     {
         this.is_transforming_from = true;
 
         if (this.webgl_opacity < 1.0) {
             this.webgl_opacity += this.webgl_dt;
         }
-        webgl_container.style.opacity = this.webgl_opacity;
+        this.webgl_container.style.opacity = this.webgl_opacity;
 
         if (this.slide_opacity > 0.0) {
             this.slide_opacity -= this.slide_dt;
         }
-        pdf_container.style.opacity = this.slide_opacity;
+        this.pdf_container.style.opacity = this.slide_opacity;
 
         // set state flags
         if (this.webgl_opacity >= 1.0 && this.slide_opacity <= 0.0) {
@@ -342,14 +382,17 @@ class PathControls
             this.is_transforming_from = false;
 
             // next action
-            if (this.next_action < 0) { return; }
-            // console.log('next_action:', this.next_action)
-            if (this.next_action == 0)      { this.next_action = -1; this.jmp_next_marker(); }
-            else if (this.next_action == 1) { this.next_action = -1; this.jmp_prev_marker(); }
-            else if (this.next_action == 2) { this.next_action = -1; this.mv_cam_to(0.0); this.current_marker = -1; }
-            else if (this.next_action == 3) { this.next_action = -1; this.mv_next_marker(); }
-        }
+            if (this.next_action < 0) { 
+                return;
+            }
 
+            switch (this.next_action) {
+                case 0: this.next_action = -1; this.jmp_next_marker(); break;
+                case 1: this.next_action = -1; this.jmp_prev_marker(); break;
+                case 2: this.next_action = -1; this.mv_cam_to(0.0); this.current_marker = -1; break;
+                case 3: this.next_action = -1; this.mv_next_marker(); break;
+            }
+        }
     }
 
 }
